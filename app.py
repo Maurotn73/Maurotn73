@@ -1,10 +1,52 @@
+import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
-from streamlit_js_eval import get_geolocation
 import math
 from PIL import Image, ImageDraw
+
+try:
+    from streamlit_gsheets import GSheetsConnection
+    HAS_GSHEETS = True
+except ModuleNotFoundError:
+    GSheetsConnection = None
+    HAS_GSHEETS = False
+
+try:
+    from streamlit_js_eval import get_geolocation
+    HAS_GEOLOCATION = True
+except ModuleNotFoundError:
+    get_geolocation = None
+    HAS_GEOLOCATION = False
+
+# Fallback semplice se non è disponibile il supporto GPS automatico
+def get_geolocation_fallback():
+    st.warning("GPS non disponibile: inserisci le coordinate manualmente.")
+    lat = st.number_input("Latitudine", value=45.4642, format="%.6f")
+    lon = st.number_input("Longitudine", value=9.1900, format="%.6f")
+    return {"coords": {"latitude": lat, "longitude": lon}} if lat is not None and lon is not None else None
+
+# Fallback locale per la persistenza dei dati se la connessione Google Sheets non è installata
+class LocalSheetConnection:
+    def __init__(self, path="presenze.csv"):
+        self.path = path
+
+    def read(self):
+        if os.path.exists(self.path):
+            try:
+                return pd.read_csv(self.path)
+            except Exception:
+                return pd.DataFrame()
+        return pd.DataFrame()
+
+    def update(self, data):
+        data.to_csv(self.path, index=False)
+
+
+def get_connection():
+    if HAS_GSHEETS:
+        return st.connection("gsheets", type=GSheetsConnection)
+    return LocalSheetConnection()
 
 # ==========================================
 # CONFIGURAZIONE PAGINA E IDENTITÀ VISIVA
@@ -57,7 +99,7 @@ with tab_timbratura:
         st.caption(f"Operatore Attivo: **{st.session_state['operatore']}**")
         
         # Richiesta coordinate GPS
-        posizione = get_geolocation()
+        posizione = get_geolocation() if HAS_GEOLOCATION else get_geolocation_fallback()
         
         if posizione:
             lat_utente = posizione['coords']['latitude']
@@ -85,7 +127,7 @@ with tab_timbratura:
                             ora_attuale_str = datetime.now().strftime("%H:%M:%S")
                             data_attuale_str = datetime.now().strftime("%Y-%m-%d")
                             
-                            conn = st.connection("gsheets", type=GSheetsConnection)
+                            conn = get_connection()
                             df_esistente = conn.read()
                             
                             ore_calcolate = ""
@@ -138,7 +180,7 @@ with tab_admin:
     st.subheader("🔍 Monitoraggio e Filtro Dipendenti")
     
     try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
+        conn = get_connection()
         df_dati = conn.read()
         
         if not df_dati.empty:
