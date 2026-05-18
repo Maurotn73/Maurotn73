@@ -99,7 +99,10 @@ with tab_timbratura:
         st.caption(f"Operatore Attivo: **{st.session_state['operatore']}**")
         
         # Richiesta coordinate GPS
-        posizione = get_geolocation() if HAS_GEOLOCATION else get_geolocation_fallback()
+        if HAS_GEOLOCATION:
+            posizione = get_geolocation()
+        else:
+            posizione = get_geolocation_fallback()
         
         if posizione:
             lat_utente = posizione['coords']['latitude']
@@ -163,7 +166,7 @@ with tab_timbratura:
                             
                             # Aggiornamento database
                             df_aggiornato = pd.concat([df_esistente, pd.DataFrame([riga])], ignore_index=True)
-                            conn.update(data=df_aggiornato)
+                            conn.update(df_aggiornato)
                             
                             st.success(f"✅ {tipo_registro} registrata con successo presso {nome_cantiere}!")
                             if ore_calcolate != "":
@@ -183,30 +186,43 @@ with tab_admin:
         conn = get_connection()
         df_dati = conn.read()
         
-        if not df_dati.empty:
+        # Verifica che il DataFrame abbia le colonne corrette
+        colonne_richieste = ['Operatore', 'Cantiere', 'Data', 'Ora', 'Tipo Registro', 'Ore Lavorate']
+        colonne_mancanti = [col for col in colonne_richieste if col not in df_dati.columns]
+        
+        if not df_dati.empty and colonne_mancanti:
+            st.warning(f"⚠️ File corrotto: mancano colonne {colonne_mancanti}. Ricreando con struttura corretta...")
+            # Ricrea il file con la struttura giusta
+            df_new = pd.DataFrame(columns=['ID', 'Data', 'Ora', 'Operatore', 'Cantiere', 'Luogo', 'Tipo Registro', 'Ore Lavorate'])
+            conn.update(df_new)
+            df_dati = conn.read()
+        
+        if not df_dati.empty and 'Operatore' in df_dati.columns:
             # Rimozione righe vuote per evitare errori di filtraggio
             df_dati = df_dati.dropna(subset=['Operatore'])
             
-            # Elenco univoco dei dipendenti presenti nel file Excel per il filtro
-            lista_dipendenti = df_dati['Operatore'].unique().tolist()
-            dipendente_selezionato = st.selectbox("Scegli il dipendente da analizzare:", lista_dipendenti)
-            
-            # Applicazione del filtro Pandas
-            df_filtrato = df_dati[df_dati['Operatore'] == dipendente_selezionato]
-            
-            st.write(f"#### Registro dei movimenti di: **{dipendente_selezionato}**")
-            st.dataframe(df_filtrato)
-            
-            # Sezione calcolo riepilogativo
-            st.write("#### 📅 Ore Totali Raggruppate per Cantiere")
-            # Convertiamo la colonna in valori numerici per poter fare la somma
-            df_filtrato['Ore Lavorate'] = pd.to_numeric(df_filtrato['Ore Lavorate'], errors='coerce')
-            
-            # Raggruppamento per Data e Cantiere per sommare le ore svolte
-            report_ore = df_filtrato.groupby(['Data', 'Cantiere'])['Ore Lavorate'].sum().reset_index()
-            st.table(report_ore)
-            
+            if not df_dati.empty:
+                # Elenco univoco dei dipendenti presenti nel file per il filtro
+                lista_dipendenti = df_dati['Operatore'].unique().tolist()
+                dipendente_selezionato = st.selectbox("Scegli il dipendente da analizzare:", lista_dipendenti)
+                
+                # Applicazione del filtro Pandas
+                df_filtrato = df_dati[df_dati['Operatore'] == dipendente_selezionato]
+                
+                st.write(f"#### Registro dei movimenti di: **{dipendente_selezionato}**")
+                st.dataframe(df_filtrato)
+                
+                # Sezione calcolo riepilogativo
+                st.write("#### 📅 Ore Totali Raggruppate per Cantiere")
+                # Convertiamo la colonna in valori numerici per poter fare la somma
+                df_filtrato['Ore Lavorate'] = pd.to_numeric(df_filtrato['Ore Lavorate'], errors='coerce')
+                
+                # Raggruppamento per Data e Cantiere per sommare le ore svolte
+                report_ore = df_filtrato.groupby(['Data', 'Cantiere'])['Ore Lavorate'].sum().reset_index()
+                st.table(report_ore)
+            else:
+                st.info("Nessun dipendente trovato con dati validi.")
         else:
-            st.info("Il file Excel è vuoto. Inizia a inserire le presenze per vedere i filtri.")
+            st.info("Il file è vuoto. Inizia a inserire le presenze dalla scheda 'Registra Presenza' per vedere i dati qui.")
     except Exception as e:
         st.error(f"Errore nel caricamento del pannello amministratore: {e}")
